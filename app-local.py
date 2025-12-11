@@ -6,20 +6,30 @@ import faiss
 import streamlit as st
 from dotenv import load_dotenv
 from openai import OpenAI
+from sentence_transformers import SentenceTransformer
 
 # === 設定 ===
-EMBEDDING_MODEL = "text-embedding-3-small"
+# ローカル埋め込みモデル（日本語対応）
+EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
 CHAT_MODEL = "gpt-5"  # GPT-5系モデル
 TOP_K = 3  # 何件のドキュメントを参照するか
 
 # === OpenAIクライアントの初期化 ===
 load_dotenv()
 try:
-    # .env の OPENAI_API_KEY を読む
+    # .env の OPENAI_API_KEY を読む（回答生成用）
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 except Exception as e:
     st.error(f"OpenAI APIキーの読み込みに失敗しました。.envファイルを確認してください。: {e}")
     st.stop()
+
+# === ローカル埋め込みモデルの初期化 ===
+@st.cache_resource(show_spinner="埋め込みモデルを読み込んでいます...")
+def load_embedding_model():
+    """
+    ローカルの埋め込みモデルを読み込む
+    """
+    return SentenceTransformer(EMBEDDING_MODEL)
 
 
 # === ドキュメント読み込み ===
@@ -50,17 +60,13 @@ def load_documents(data_dir: str = "data"):
 
 
 # === 埋め込み生成 ===
-def embed_texts(texts):
+def embed_texts(texts, model):
     """
-    OpenAIの埋め込みAPIを利用して、テキストリストをベクトル化
+    ローカルの埋め込みモデルを利用して、テキストリストをベクトル化
     """
     try:
-        resp = client.embeddings.create(
-            model=EMBEDDING_MODEL,
-            input=texts,
-        )
-        embeddings = [d.embedding for d in resp.data]
-        return np.array(embeddings, dtype="float32")
+        embeddings = model.encode(texts, convert_to_numpy=True, normalize_embeddings=True)
+        return embeddings.astype("float32")
     except Exception as e:
         st.error(f"Embeddingの生成に失敗しました: {e}")
         return None
@@ -68,7 +74,7 @@ def embed_texts(texts):
 
 # === ベクトルインデックスの構築 ===
 @st.cache_resource(show_spinner="ドキュメントをベクトル化しています...")
-def build_index():
+def build_index(_embedding_model):
     """
     ドキュメントを読み込み、ベクトル化し、Faissインデックスを構築する
     """
@@ -78,7 +84,7 @@ def build_index():
         st.stop()
 
     texts = [d["text"] for d in docs]
-    embeddings = embed_texts(texts)
+    embeddings = embed_texts(texts, _embedding_model)
 
     if embeddings is None:
         st.error("Embeddingの生成に失敗したため、インデックスを構築できません。")
@@ -92,11 +98,11 @@ def build_index():
 
 
 # === 検索（Retrieval） ===
-def search_similar_docs(query: str, index, docs, k: int = TOP_K):
+def search_similar_docs(query: str, index, docs, embedding_model, k: int = TOP_K):
     """
     質問文をベクトル化し、Faissで類似ドキュメントを検索する
     """
-    query_emb = embed_texts([query])  # shape: (1, dim)
+    query_emb = embed_texts([query], embedding_model)  # shape: (1, dim)
     if query_emb is None:
         return []
 
@@ -177,15 +183,22 @@ def generate_answer(system_prompt: str, user_prompt: str):
 def main():
     st.set_page_config(page_title="RAGをゼロから実装する【2025年版】", layout="wide")
     st.title("RAGをゼロから実装して仕組みを学ぶ【2025年版】")
-    st.caption(f"モデル: {CHAT_MODEL} | Embedding: {EMBEDDING_MODEL} | 検索: Faiss")
+    st.caption(f"モデル: {CHAT_MODEL} | Embedding: {EMBEDDING_MODEL} (ローカル) | 検索: Faiss")
 
     st.write(
         f"このデモでは、ローカルの `{Path('data').resolve()}` フォルダ内にある `.txt` ドキュメントを検索対象にした、シンプルなRAGを実装しています。"
     )
 
+    # 埋め込みモデルの読み込み
+    try:
+        embedding_model = load_embedding_model()
+    except Exception as e:
+        st.error(f"埋め込みモデルの読み込みに失敗しました。: {e}")
+        st.stop()
+
     # インデックス構築
     try:
-        index, embeddings, docs = build_index()
+        index, embeddings, docs = build_index(embedding_model)
     except Exception as e:
         st.error(f"インデックスの構築に失敗しました。: {e}")
         st.stop()
@@ -207,7 +220,7 @@ def main():
     if run and question:
         with st.spinner("検索 & 回答生成中..."):
             # 1. 検索
-            retrieved = search_similar_docs(question, index, docs, k=top_k)
+            retrieved = search_similar_docs(question, index, docs, embedding_model, k=top_k)
 
             if not retrieved:
                 st.error("検索に失敗しました。")

@@ -1,0 +1,5 @@
+RAG（Retrieval-Augmented Generation）は、2020年にLewisらによって提案された手法です。
+RAGは、生成AIが外部のデータベースから関連情報を取得し、それを回答に活用する技術です。通常の大規模言語モデル（LLM）は、学習済みのデータに基づいて応答を生成します。（参考: OpenAI公式 https://help.openai.com/en/articles/8868588-retrieval-augmented-generation-rag-and-semantic-search-for-gpts ）
+2025年現在、RAGはGPT-5のような最新モデルと組み合わせて利用されることが一般的であり、多くのエンタープライズAIシステムの中核技術となっています。
+ベクトルデータベースにはFaissやPinecone、Milvusなどがよく使われます。
+株式会社ナレッジセンスは、エンタープライズ向けのRAGプロダクト「ChatSense」を開発しています。主な特徴は、高精度な検索とセキュリティです。
